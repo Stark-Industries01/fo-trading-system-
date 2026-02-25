@@ -3,6 +3,7 @@ const mongoose = require('mongoose');
 const cors = require('cors');
 const http = require('http');
 const socketIo = require('socket.io');
+const path = require('path');
 require('dotenv').config();
 
 const app = express();
@@ -16,7 +17,7 @@ const io = socketIo(server, {
 
 // Middleware
 app.use(cors());
-app.use(express.json());
+app.use(express.json({ limit: '50mb' }));
 
 // MongoDB Connection
 mongoose.connect(process.env.MONGODB_URI || 'mongodb://localhost:27017/fo-trading')
@@ -50,13 +51,20 @@ app.use('/api/news', newsRoutes);
 app.use('/api/analytics', analyticsRoutes);
 app.use('/api/settings', settingsRoutes);
 
+// Serve React Build
+if (process.env.NODE_ENV === 'production') {
+  app.use(express.static(path.join(__dirname, 'client/build')));
+  app.get('*', (req, res) => {
+    res.sendFile(path.join(__dirname, 'client/build', 'index.html'));
+  });
+}
+
 // Socket Connection
 io.on('connection', (socket) => {
   console.log('🔌 Client connected:', socket.id);
-  
+
   socket.on('subscribe', (channel) => {
     socket.join(channel);
-    console.log(`📢 Subscribed to ${channel}`);
   });
 
   socket.on('disconnect', () => {
@@ -64,14 +72,35 @@ io.on('connection', (socket) => {
   });
 });
 
+// Start Cron Jobs
+const CronJobs = require('./services/cronJobs');
+const cronJobs = new CronJobs(io);
+cronJobs.startAll();
+
+// Start Telegram Bot
+const telegramBot = require('./services/telegramBot');
+telegramBot.initialize();
+
 // Health Check
 app.get('/api/health', (req, res) => {
-  res.json({ status: 'OK', message: 'F&O Trading System Running!' });
+  res.json({
+    status: 'OK',
+    message: 'F&O Trading System Running!',
+    uptime: process.uptime(),
+    timestamp: new Date()
+  });
 });
 
 const PORT = process.env.PORT || 5000;
 server.listen(PORT, () => {
-  console.log(`🚀 Server running on port ${PORT}`);
+  console.log(`
+  ╔═══════════════════════════════════════╗
+  ║   🚀 F&O Trading System Started!     ║
+  ║   📡 Port: ${PORT}                       ║
+  ║   📊 30 Modules Active               ║
+  ║   ✅ Ready to Trade!                  ║
+  ╚═══════════════════════════════════════╝
+  `);
 });
 
 module.exports = { app, io };
